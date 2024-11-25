@@ -604,6 +604,16 @@ project_points_fwd_tensor(
     const uint32_t image_width, const uint32_t image_height,
     const float near_plane, const float far_plane);
 
+std::tuple<torch::Tensor, torch::Tensor>
+points_isect_tiles_tensor(const torch::Tensor &means2d, // [C, N, 2] or [nnz, 2]
+                          const torch::Tensor &radii,   // [C, N] or [nnz]
+                          const torch::Tensor &depths,  // [C, N] or [nnz]
+                          const at::optional<torch::Tensor> &camera_ids,   // [nnz]
+                          const at::optional<torch::Tensor> &gaussian_ids, // [nnz]
+                          const uint32_t C, const uint32_t tile_size,
+                          const uint32_t tile_width, const uint32_t tile_height,
+                          const bool sort, const bool double_buffer);
+
 // gof
 
 } // namespace gsplat

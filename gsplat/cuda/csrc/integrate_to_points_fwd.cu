@@ -520,7 +520,6 @@ std::tuple<torch::Tensor, torch::Tensor> call_kernel_with_dim(
                                         means2d.options().dtype(torch::kFloat32));
     torch::Tensor out_integrated_alphas = torch::full({C, PN}, 1.0,
                                         means2d.options().dtype(torch::kFloat32));
-    printf("out_integrated_alphas size: %d %d\n", out_integrated_alphas.size(0), out_integrated_alphas.size(1));
     // 1 for last_ids and 1 for max_contributor 
     torch::Tensor last_ids = torch::empty({C, image_height, image_width, 2},
                                           means2d.options().dtype(torch::kInt32));

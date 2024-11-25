@@ -102,5 +102,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("integrate_to_points_fwd", &gsplat::integrate_to_points_fwd_tensor);
     m.def("project_points_fwd", &gsplat::project_points_fwd_tensor);
 
+    m.def("points_isect_tiles", &gsplat::points_isect_tiles_tensor);
+
     // gof
 }

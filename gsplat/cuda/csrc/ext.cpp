@@ -89,4 +89,18 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     );
 
     m.def("selective_adam_update", &gsplat::selective_adam_update);
+
+    // gof
+
+    m.def("raytracing_to_pixels_fwd", &gsplat::raytracing_to_pixels_fwd_tensor);
+    m.def("raytracing_to_pixels_bwd", &gsplat::raytracing_to_pixels_bwd_tensor);
+
+    m.def("view_to_gaussians_fwd", &gsplat::view_to_gaussians_fwd_tensor);
+    m.def("view_to_gaussians_bwd", &gsplat::view_to_gaussians_bwd_tensor);
+
+    m.def("compute_3D_smoothing_filter_fwd", &gsplat::compute_3D_smoothing_filter_fwd_tensor); 
+    m.def("integrate_to_points_fwd", &gsplat::integrate_to_points_fwd_tensor);
+    m.def("project_points_fwd", &gsplat::project_points_fwd_tensor);
+
+    // gof
 }

@@ -3,6 +3,9 @@ import warnings
 from .compression import PngCompression
 from .cuda._torch_impl import accumulate
 from .cuda._torch_impl_2dgs import accumulate_2dgs
+from .cuda._wrapper_gof import (
+    compute_3D_smoothing_filter
+)
 from .cuda._wrapper import (
     fully_fused_projection,
     isect_offset_encode,

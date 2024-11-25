@@ -12,6 +12,8 @@ template <typename T> using vec3 = glm::vec<3, T>;
 
 template <typename T> using vec4 = glm::vec<4, T>;
 
+template <typename T> using vec10 = std::array<T, 10>;
+
 template <typename T> using mat2 = glm::mat<2, 2, T>;
 
 template <typename T> using mat3 = glm::mat<3, 3, T>;

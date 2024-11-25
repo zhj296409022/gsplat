@@ -894,7 +894,6 @@ class _FullyFusedProjection(torch.autograd.Function):
             None,
             None,
             None,
-            None,
         )
 
 

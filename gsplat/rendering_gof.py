@@ -506,7 +506,7 @@ def integration(
     sparse_grad: bool = False,
     absgrad: bool = False,
     rasterize_mode: Literal["classic", "antialiased"] = "classic",
-) -> Tuple[Tensor, Tensor, Dict]:
+) -> Tuple[Tensor, Tensor, Tensor, Dict]:
     """evaluating Gaussian Opacity Fields from a set of 3D Gaussians (N) to a batch of image planes (C) using.
 
     TODO: update the doc to integration.
@@ -814,7 +814,7 @@ def integration(
     camtoworlds = torch.linalg.inv(viewmats)  # [C, 4, 4]
     view2gaussians = view_to_gaussians(means, quats, scales, camtoworlds, radii)
     
-    integrated_colors, integrated_alphas = integrate_to_points(
+    render_colors, integrated_alphas, integrated_colors = integrate_to_points(
         points2d,
         point_depths,
         means2d,
@@ -855,4 +855,4 @@ def integration(
         "tile_size": tile_size,
     }
 
-    return integrated_colors, integrated_alphas, meta
+    return render_colors, integrated_alphas, integrated_colors, meta

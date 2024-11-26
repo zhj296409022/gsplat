@@ -573,7 +573,7 @@ torch::Tensor compute_3D_smoothing_filter_fwd_tensor(
     const uint32_t image_width, const uint32_t image_height, 
     const float near_plane);
 
-std::tuple<torch::Tensor, torch::Tensor> 
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> 
 integrate_to_points_fwd_tensor(
     // Point parameters
     const torch::Tensor &points2d,                   // [C, N, 2]

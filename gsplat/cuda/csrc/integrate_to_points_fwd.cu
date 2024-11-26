@@ -36,6 +36,7 @@ __global__ void integrate_to_points_fwd_kernel(
     S *__restrict__ render_colors, // [C, image_height, image_width, COLOR_DIM]
     S *__restrict__ render_alphas, // [C, image_height, image_width, 1]
     S *__restrict__ out_integrated_alphas, // [C, PN]
+    S *__restrict__ out_integrated_colors, // [C, PN, COLOR_DIM]
     int32_t *__restrict__ last_ids // [C, image_height, image_width]
 ) {
     // each thread draws one pixel, but also timeshares caching gaussians in a
@@ -51,6 +52,7 @@ __global__ void integrate_to_points_fwd_kernel(
     render_colors += camera_id * image_height * image_width * (COLOR_DIM + 1 + 3);
     render_alphas += camera_id * image_height * image_width;
     out_integrated_alphas += camera_id * PN;
+    out_integrated_colors += camera_id * PN * COLOR_DIM;
     last_ids += camera_id * image_height * image_width * 2;
     Ks += camera_id * 9;
     
@@ -114,8 +116,8 @@ __global__ void integrate_to_points_fwd_kernel(
     // designated pixel
     uint32_t tr = block.thread_rank();
 
-    // + 1 for depth and + 3 for normal
-    S pix_out[COLOR_DIM + 1 + 3] = {0.f};
+    // + 1 for depth 
+    S pix_out[COLOR_DIM + 1] = {0.f};
 
     #define MAX_NUM_CONTRIBUTORS 256
 
@@ -212,6 +214,10 @@ __global__ void integrate_to_points_fwd_kernel(
                         pix_out[ch] += c_ptr[ch] * vis;
                     }    
                 }
+
+                if (depth > pix_out[3]) {
+                    pix_out[3] = depth;
+                }
                 
                 last_contributor = batch_start + t - range_start;
 
@@ -253,8 +259,8 @@ __global__ void integrate_to_points_fwd_kernel(
                 backgrounds == nullptr ? pix_out[k] : (pix_out[k] + T * backgrounds[k]);
         }
     }
-    
-    // return;
+
+    const float max_depth = pix_out[3];
 
     // Allocate storage for batches of collectively fetched data.
     #define MAX_NUM_PROJECTED 256
@@ -315,8 +321,7 @@ __global__ void integrate_to_points_fwd_kernel(
                 const float depth = point_xy_depth.z;
                 if ((point_xy.x >= (px - 0.5)) && (point_xy.x < (px + 0.5)) && 
 					(point_xy.y >= (py - 0.5)) && (point_xy.y < (py + 0.5))){
-					//TODO maybe add a check for depth to filter some points
-					if (true ){
+					if (true || max_depth <= 0 || depth < max_depth){
 
 						if (num_projected >= MAX_NUM_PROJECTED){
 							done = true;
@@ -423,16 +428,11 @@ __global__ void integrate_to_points_fwd_kernel(
                     
                     // t is the depth of the gaussian
                     S depth = -BB/(2*AA);
-                    
                     if (depth > ray_depth){
 						depth = ray_depth;
 					}
                     
                     S power = -0.5f * (AA * depth * depth + BB * depth + CC);
-                    if (power > 0.0f){
-                        power = 0.0f;
-                    }
-                    
                     S alpha = min(0.999f, opac * exp(power));
 
                     if (alpha < 1.f / 255.f) {
@@ -451,8 +451,9 @@ __global__ void integrate_to_points_fwd_kernel(
             for (int k = 0; k < num_projected; k++){
 				out_integrated_alphas[projected_ids[k]] = point_alphas[k];
 				// // write colors
-				// for (int ch = 0; ch < CHANNELS; ch++)
-				// 	out_color_integrated[CHANNELS * projected_ids[k] + ch] = C[ch] + corner_Ts[0] * bg_color[ch];;
+				for (int ch = 0; ch < COLOR_DIM; ch++)
+				    out_integrated_colors[COLOR_DIM * projected_ids[k] + ch] = 
+                        backgrounds == nullptr ? pix_out[ch] : (pix_out[ch] + corner_Ts[0] * backgrounds[ch]);
 			}
         }
 
@@ -460,7 +461,7 @@ __global__ void integrate_to_points_fwd_kernel(
 }
 
 template <uint32_t CDIM>
-std::tuple<torch::Tensor, torch::Tensor> call_kernel_with_dim(
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> call_kernel_with_dim(
     // Point parameters
     const torch::Tensor &points2d,                   // [C, N, 2]
     const torch::Tensor &point_depths,                    // [C, N, 3]
@@ -520,6 +521,8 @@ std::tuple<torch::Tensor, torch::Tensor> call_kernel_with_dim(
                                         means2d.options().dtype(torch::kFloat32));
     torch::Tensor out_integrated_alphas = torch::full({C, PN}, 1.0,
                                         means2d.options().dtype(torch::kFloat32));
+    torch::Tensor out_integrated_colors = torch::full({C, PN, CDIM}, 0.0,
+                                        means2d.options().dtype(torch::kFloat32));
     // 1 for last_ids and 1 for max_contributor 
     torch::Tensor last_ids = torch::empty({C, image_height, image_width, 2},
                                           means2d.options().dtype(torch::kInt32));
@@ -555,12 +558,13 @@ std::tuple<torch::Tensor, torch::Tensor> call_kernel_with_dim(
             point_tile_offsets.data_ptr<int32_t>(), point_flatten_ids.data_ptr<int32_t>(),
             renders.data_ptr<float>(), alphas.data_ptr<float>(),
             out_integrated_alphas.data_ptr<float>(),
+            out_integrated_colors.data_ptr<float>(),
             last_ids.data_ptr<int32_t>());
 
-    return std::make_tuple(renders, out_integrated_alphas);
+    return std::make_tuple(renders, out_integrated_alphas, out_integrated_colors);
 }
 
-std::tuple<torch::Tensor, torch::Tensor> integrate_to_points_fwd_tensor(
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> integrate_to_points_fwd_tensor(
     // Point parameters
     const torch::Tensor &points2d,                   // [C, N, 2]
     const torch::Tensor &point_depths,                    // [C, N, 3]

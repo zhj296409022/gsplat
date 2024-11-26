@@ -457,7 +457,7 @@ def integrate_to_points(
         tile_width * tile_size >= image_width
     ), f"Assert Failed: {tile_width} * {tile_size} >= {image_width}"
 
-    render_colors, render_alphas = _make_lazy_cuda_func(
+    return_colors, render_alphas, render_colors = _make_lazy_cuda_func(
             "integrate_to_points_fwd"
         )(
             points2d,
@@ -479,7 +479,7 @@ def integrate_to_points(
         )
         
 
-    return render_colors, render_alphas
+    return return_colors, render_alphas, render_colors
 
 
 class _RayTracingToPixels(torch.autograd.Function):

@@ -105,4 +105,39 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("points_isect_tiles", &gsplat::points_isect_tiles_tensor);
 
     // gof
+
+    // rade
+
+    m.def(
+        "rade_fully_fused_projection_fwd", &gsplat::rade_fully_fused_projection_fwd_tensor
+    );
+    m.def(
+        "rade_fully_fused_projection_bwd", &gsplat::rade_fully_fused_projection_bwd_tensor
+    );
+
+    m.def(
+        "rade_fully_fused_projection_integration_fwd", &gsplat::rade_fully_fused_projection_integration_fwd_tensor
+    );
+
+    m.def(
+        "rade_fully_fused_projection_integration_packed_fwd", &gsplat::rade_fully_fused_projection_integration_packed_fwd_tensor
+    );
+
+    m.def(
+        "rade_fully_fused_projection_packed_fwd",
+        &gsplat::rade_fully_fused_projection_packed_fwd_tensor
+    );
+    m.def(
+        "rade_fully_fused_projection_packed_bwd",
+        &gsplat::rade_fully_fused_projection_packed_bwd_tensor
+    );
+
+    m.def("rade_integrate_to_points_fwd", &gsplat::rade_integrate_to_points_fwd_tensor);
+
+    m.def("rade_rasterize_to_pixels_w_depth_fwd", &gsplat::rade_rasterize_to_pixels_w_depth_fwd_tensor);
+    m.def("rade_rasterize_to_pixels_wo_depth_fwd", &gsplat::rade_rasterize_to_pixels_wo_depth_fwd_tensor);
+    m.def("rade_rasterize_to_pixels_w_depth_bwd", &gsplat::rade_rasterize_to_pixels_w_depth_bwd_tensor);
+    m.def("rade_rasterize_to_pixels_wo_depth_bwd", &gsplat::rade_rasterize_to_pixels_wo_depth_bwd_tensor);
+
+    // rade
 }

@@ -692,7 +692,7 @@ rade_fully_fused_projection_packed_bwd_tensor(
     const torch::Tensor &v_normals,                       // [nnz, 3]
     const bool viewmats_requires_grad, const bool sparse_grad);
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> 
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> 
 rade_rasterize_to_pixels_wo_depth_fwd_tensor(
     // Gaussian parameters
     const torch::Tensor &means2d,                   // [C, N, 2]
@@ -705,7 +705,8 @@ rade_rasterize_to_pixels_wo_depth_fwd_tensor(
     const uint32_t image_width, const uint32_t image_height, const uint32_t tile_size,
     // intersections
     const torch::Tensor &tile_offsets, // [C, tile_height, tile_width]
-    const torch::Tensor &flatten_ids   // [n_isects]
+    const torch::Tensor &flatten_ids,   // [n_isects]
+    const bool record_transmittance
 );
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> 

@@ -47,6 +47,7 @@ def rasterization(
     rasterize_mode: Literal["classic", "antialiased"] = "classic",
     require_rade: bool = False,
     channel_chunk: int = 32,
+    record_transmittance: bool = False
 ) -> Tuple[Tensor, Tensor, Dict]:
     """Rasterize a set of 3D Gaussians (N) to a batch of image planes (C).
 
@@ -352,7 +353,7 @@ def rasterization(
                 else None
             )
             require_rade_ = require_rade and (not i)
-            render_colors_, render_alphas_, median_depths_, expected_depth_, expected_normal_ = rasterize_to_pixels(
+            render_colors_, render_alphas_, median_depths_, expected_depth_, expected_normal_, transmittance_ = rasterize_to_pixels(
                 means2d,
                 conics,
                 colors_chunk,
@@ -380,8 +381,9 @@ def rasterization(
 
         render_colors = torch.cat(render_colors, dim=-1)
         render_alphas = render_alphas[0]  # discard the rest
+        transmittance = transmittance_
     else:
-        render_colors, render_alphas, expected_depth, median_depths, expected_normal = rasterize_to_pixels(
+        render_colors, render_alphas, expected_depth, median_depths, expected_normal, transmittance = rasterize_to_pixels(
             means2d,
             conics,
             colors,
@@ -398,7 +400,8 @@ def rasterization(
             backgrounds=backgrounds,
             packed=packed,
             absgrad=absgrad,
-            require_geo=require_rade
+            require_geo=require_rade,
+            record_transmittance=record_transmittance
         )
         if require_rade:
             expected_depth = expected_depth/render_alphas.clamp(min=1e-10)
@@ -431,6 +434,7 @@ def rasterization(
         "height": height,
         "tile_size": tile_size,
         "n_cameras": C,
+        "transmittance": transmittance
     }
     return render_colors, render_alphas, expected_depth, median_depths, expected_normal, meta
 
@@ -813,4 +817,4 @@ def integration(
         "tile_size": tile_size,
     }
     
-    return render_colors, integrated_alphas, integrated_colors, coordinates_2d, sdf, meta
+    return render_colors, integrated_alphas, integrated_colors, point_coordinate, point_sdf, meta

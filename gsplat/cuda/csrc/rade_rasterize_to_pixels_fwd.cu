@@ -36,7 +36,9 @@ __global__ void rasterize_to_pixels_fwd_kernel(
     S *__restrict__ median_depths, // [C, image_height, image_width, 1]
     S *__restrict__ render_normals,// [C, image_height, image_width, 3]
     int32_t *__restrict__ median_ids, // [C, image_height, image_width]
-    int32_t *__restrict__ last_ids // [C, image_height, image_width]
+    int32_t *__restrict__ last_ids, // [C, image_height, image_width]
+    S *__restrict__ transmittance, // [C, N]
+    const bool record_transmittance
 ) {
     // each thread draws one pixel, but also timeshares caching gaussians in a
     // shared tile
@@ -171,6 +173,12 @@ __global__ void rasterize_to_pixels_fwd_kernel(
                 0.5f * (conic.x * delta.x * delta.x + conic.z * delta.y * delta.y) +
                 conic.y * delta.x * delta.y;
             S alpha = min(0.999f, opac * __expf(-sigma));
+
+            if (record_transmittance) {
+                S trans = pow(alpha, 2 * 0.5) * pow(T, 2 - 2 * 0.5);
+                atomicAdd(&transmittance[id_batch[t]], trans);
+            }
+
             if (sigma < 0.f || alpha < 1.f / 255.f) {
                 continue;
             }
@@ -207,7 +215,7 @@ __global__ void rasterize_to_pixels_fwd_kernel(
                 }
                 // printf("%f %f %f %f %f %f\n",depth_out,t_opt,ray_t,ln,ray_plane.x,ray_plane.y);
             }
-            
+
             cur_idx = batch_start + t;
 
             T = next_T;
@@ -258,7 +266,8 @@ T call_kernel_with_dim(
     const torch::Tensor &Ks,
     // intersections
     const torch::Tensor &tile_offsets, // [C, tile_height, tile_width]
-    const torch::Tensor &flatten_ids   // [n_isects]
+    const torch::Tensor &flatten_ids,   // [n_isects]
+    const bool record_transmittance
 ) {
     GSPLAT_DEVICE_GUARD(means2d);
     GSPLAT_CHECK_INPUT(means2d);
@@ -276,7 +285,7 @@ T call_kernel_with_dim(
     bool packed = means2d.dim() == 2;
 
     constexpr unsigned int output_size = std::tuple_size_v<T>;
-    constexpr bool GEO = output_size > 3;
+    constexpr bool GEO = output_size > 4;
     if constexpr (GEO)
     {
         GSPLAT_CHECK_INPUT(ray_ts);
@@ -310,6 +319,9 @@ T call_kernel_with_dim(
                                           means2d.options().dtype(torch::kInt32));
     torch::Tensor last_ids = torch::empty({C, image_height, image_width},
                                           means2d.options().dtype(torch::kInt32));
+
+    torch::Tensor transmittance = record_transmittance ? torch::empty({ C, N },
+                                          means2d.options().dtype(torch::kFloat32)) : torch::Tensor();
 
     at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
     const uint32_t shared_mem = 
@@ -346,12 +358,14 @@ T call_kernel_with_dim(
             GEO ? median_depths.data_ptr<float>() : nullptr, 
             GEO ? expected_normals.data_ptr<float>() : nullptr,
             GEO ? median_ids.data_ptr<int32_t>() : nullptr,
-            last_ids.data_ptr<int32_t>());
+            last_ids.data_ptr<int32_t>(),
+            record_transmittance ? transmittance.data_ptr<float>() : nullptr,
+            record_transmittance);
     
     if constexpr (GEO)
         return std::make_tuple(renders, alphas, expected_depths, median_depths, expected_normals, median_ids, last_ids);
     else
-        return std::make_tuple(renders, alphas, last_ids);
+        return std::make_tuple(renders, alphas, last_ids, transmittance);
 }
 
 template<class T>
@@ -371,17 +385,19 @@ T rasterize_to_pixels_fwd(
     const torch::Tensor &Ks,
     // intersections
     const torch::Tensor &tile_offsets, // [C, tile_height, tile_width]
-    const torch::Tensor &flatten_ids   // [n_isects]
+    const torch::Tensor &flatten_ids,   // [n_isects]
+    const bool record_transmittance
 ){
     GSPLAT_CHECK_INPUT(colors);
     uint32_t channels = colors.size(-1);
 
 #define __GS__CALL_(N)                                                                 \
     case N:                                                                            \
-        return call_kernel_with_dim<T, N>(means2d, conics, colors, opacities,             \
+        return call_kernel_with_dim<T, N>(means2d, conics, colors, opacities,          \
                                        ray_ts, ray_planes, normals,                    \
-                                       backgrounds, masks, image_width, image_height, \
-                                       tile_size, Ks, tile_offsets, flatten_ids);
+                                       backgrounds, masks, image_width, image_height,  \
+                                       tile_size, Ks, tile_offsets, flatten_ids,       \
+                                       record_transmittance);
 
     // TODO: an optimization can be done by passing the actual number of channels into
     // the kernel functions and avoid necessary global memory writes. This requires
@@ -411,7 +427,7 @@ T rasterize_to_pixels_fwd(
     }
 }
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 rade_rasterize_to_pixels_wo_depth_fwd_tensor(
     // Gaussian parameters
     const torch::Tensor &means2d,    // [C, N, 2] or [nnz, 2]
@@ -424,16 +440,17 @@ rade_rasterize_to_pixels_wo_depth_fwd_tensor(
     const uint32_t image_width, const uint32_t image_height, const uint32_t tile_size,
     // intersections
     const torch::Tensor &tile_offsets, // [C, tile_height, tile_width]
-    const torch::Tensor &flatten_ids   // [n_isects]
+    const torch::Tensor &flatten_ids,   // [n_isects]
+    const bool record_transmittance
 ){
     torch::Tensor ray_ts;
     torch::Tensor ray_planes;
     torch::Tensor normals;
     torch::Tensor Ks;
-    return rasterize_to_pixels_fwd<std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>>
+    return rasterize_to_pixels_fwd<std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>>
                                     (means2d, conics, colors, opacities, ray_ts, ray_planes, normals, 
                                         backgrounds, masks, image_width, image_height, tile_size, 
-                                        Ks, tile_offsets, flatten_ids);
+                                        Ks, tile_offsets, flatten_ids, record_transmittance);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
@@ -458,7 +475,7 @@ rade_rasterize_to_pixels_w_depth_fwd_tensor(
     return rasterize_to_pixels_fwd<std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>>
                                     (means2d, conics, colors, opacities, ray_ts, ray_planes, normals, 
                                         backgrounds, masks, image_width, image_height, tile_size, 
-                                        Ks, tile_offsets, flatten_ids);
+                                        Ks, tile_offsets, flatten_ids, false);
 }
 
 } // namespace gsplat

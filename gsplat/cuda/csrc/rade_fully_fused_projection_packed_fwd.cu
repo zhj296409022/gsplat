@@ -18,7 +18,7 @@ namespace cg = cooperative_groups;
  * Projection of Gaussians (Batched) Forward Pass 2DGS
  ****************************************************************************/
 
-template <typename T, bool INTE = false>
+template <typename T>
 __global__ void fully_fused_projection_packed_fwd_kernel(
     const uint32_t C, const uint32_t N,
     const T *__restrict__ means,    // [N, 3]
@@ -42,9 +42,7 @@ __global__ void fully_fused_projection_packed_fwd_kernel(
     T *__restrict__ compensations,   // [nnz] optional
     T *__restrict__ ray_ts,             // [nnz]
     T *__restrict__ ray_planes,      // [nnz, 2]
-    T *__restrict__ normals,      // [nnz, 2]
-    T *__restrict__ invraycov3Ds, // [nnz, 6] optional
-    bool *__restrict__ conditions // [nnz] optional
+    T *__restrict__ normals      // [nnz, 2]
 ) {
     int32_t blocks_per_row = gridDim.x;
 
@@ -109,13 +107,8 @@ __global__ void fully_fused_projection_packed_fwd_kernel(
 
         // perspective projection
         Ks += row_idx * 9;
-        bool condition = rade_persp_proj<T, INTE>(R, mean_c, covar_c, Ks[0], Ks[4], Ks[2], Ks[5], image_width,
-                          image_height, covar2d, mean2d, ray_plane, normal, invraycov3Ds);
-        
-        if constexpr (INTE)
-        {
-            conditions[col_idx] = condition;
-        }
+        rade_persp_proj<T>(mean_c, covar_c, Ks[0], Ks[4], Ks[2], Ks[5], image_width,
+                          image_height, covar2d, mean2d, ray_plane, normal);
 
         det = add_blur(eps2d, covar2d, compensation);
         if (det <= 0.f) {
@@ -247,7 +240,7 @@ rade_fully_fused_projection_packed_fwd_tensor(
     torch::Tensor block_accum;
     if (C && N) {
         torch::Tensor block_cnts = torch::empty({nrows * blocks_per_row}, opt);
-        fully_fused_projection_packed_fwd_kernel<float, false><<<blocks, threads, 0, stream>>>(
+        fully_fused_projection_packed_fwd_kernel<float><<<blocks, threads, 0, stream>>>(
             C, N, means.data_ptr<float>(),
             covars.has_value() ? covars.value().data_ptr<float>() : nullptr,
             quats.has_value() ? quats.value().data_ptr<float>() : nullptr,
@@ -255,7 +248,7 @@ rade_fully_fused_projection_packed_fwd_tensor(
             viewmats.data_ptr<float>(), Ks.data_ptr<float>(), image_width, image_height,
             eps2d, near_plane, far_plane, radius_clip, nullptr,
             block_cnts.data_ptr<int32_t>(), nullptr, nullptr, nullptr, nullptr, nullptr,
-            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
         block_accum = torch::cumsum(block_cnts, 0, torch::kInt32);
         nnz = block_accum[-1].item<int32_t>();
     } else {
@@ -280,7 +273,7 @@ rade_fully_fused_projection_packed_fwd_tensor(
     }
 
     if (nnz) {
-        fully_fused_projection_packed_fwd_kernel<float, false><<<blocks, threads, 0, stream>>>(
+        fully_fused_projection_packed_fwd_kernel<float><<<blocks, threads, 0, stream>>>(
             C, N, means.data_ptr<float>(),
             covars.has_value() ? covars.value().data_ptr<float>() : nullptr,
             quats.has_value() ? quats.value().data_ptr<float>() : nullptr,
@@ -294,7 +287,7 @@ rade_fully_fused_projection_packed_fwd_tensor(
             calc_compensations ? compensations.data_ptr<float>() : nullptr,
             ray_ts.data_ptr<float>(),
             ray_planes.data_ptr<float>(),
-            normals.data_ptr<float>(),  nullptr, nullptr);
+            normals.data_ptr<float>());
     } else {
         indptr.fill_(0);
     }
@@ -346,7 +339,7 @@ rade_fully_fused_projection_integration_packed_fwd_tensor(
     torch::Tensor block_accum;
     if (C && N) {
         torch::Tensor block_cnts = torch::empty({nrows * blocks_per_row}, opt);
-        fully_fused_projection_packed_fwd_kernel<float, true><<<blocks, threads, 0, stream>>>(
+        fully_fused_projection_packed_fwd_kernel<float><<<blocks, threads, 0, stream>>>(
             C, N, means.data_ptr<float>(),
             covars.has_value() ? covars.value().data_ptr<float>() : nullptr,
             quats.has_value() ? quats.value().data_ptr<float>() : nullptr,
@@ -354,7 +347,7 @@ rade_fully_fused_projection_integration_packed_fwd_tensor(
             viewmats.data_ptr<float>(), Ks.data_ptr<float>(), image_width, image_height,
             eps2d, near_plane, far_plane, radius_clip, nullptr,
             block_cnts.data_ptr<int32_t>(), nullptr, nullptr, nullptr, nullptr, nullptr,
-            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
         block_accum = torch::cumsum(block_cnts, 0, torch::kInt32);
         nnz = block_accum[-1].item<int32_t>();
     } else {
@@ -382,7 +375,7 @@ rade_fully_fused_projection_integration_packed_fwd_tensor(
     torch::Tensor conditions = torch::full({nnz}, 0.0, means.options().dtype(torch::kBool));
 
     if (nnz) {
-        fully_fused_projection_packed_fwd_kernel<float, true><<<blocks, threads, 0, stream>>>(
+        fully_fused_projection_packed_fwd_kernel<float><<<blocks, threads, 0, stream>>>(
             C, N, means.data_ptr<float>(),
             covars.has_value() ? covars.value().data_ptr<float>() : nullptr,
             quats.has_value() ? quats.value().data_ptr<float>() : nullptr,
@@ -396,9 +389,7 @@ rade_fully_fused_projection_integration_packed_fwd_tensor(
             calc_compensations ? compensations.data_ptr<float>() : nullptr,
             ray_ts.data_ptr<float>(),
             ray_planes.data_ptr<float>(),
-            normals.data_ptr<float>(),
-            invraycov3Ds.data_ptr<float>(),
-            conditions.data_ptr<bool>());
+            normals.data_ptr<float>());
     } else {
         indptr.fill_(0);
     }

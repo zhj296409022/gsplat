@@ -18,7 +18,7 @@ namespace cg = cooperative_groups;
  * Projection of Gaussians (Single Batch) Forward Pass
  ****************************************************************************/
 
-template <typename T, bool INTE = false>
+template <typename T>
 __global__ void
 fully_fused_projection_fwd_kernel(const uint32_t C, const uint32_t N,
                                   const T *__restrict__ means,    // [N, 3]
@@ -38,9 +38,7 @@ fully_fused_projection_fwd_kernel(const uint32_t C, const uint32_t N,
                                   T *__restrict__ compensations, // [C, N] optional
                                   T *__restrict__ ray_ts, // [C, N] optional
                                   T *__restrict__ ray_planes, // [C, N, 2] optional
-                                  T *__restrict__ normals, // [C, N] optional
-                                  T *__restrict__ invraycov3Ds, // [C, P, 6] optional
-                                  bool *__restrict__ conditions // [C, N] optional
+                                  T *__restrict__ normals // [C, N] optional
 ) {
     // parallelize over C * N.
     uint32_t idx = cg::this_grid().thread_rank();
@@ -54,7 +52,6 @@ fully_fused_projection_fwd_kernel(const uint32_t C, const uint32_t N,
     means += gid * 3;
     viewmats += cid * 16;
     Ks += cid * 9;
-    conditions += cid * N;
 
     // glm is column-major but input is row-major
     mat3<T> R = mat3<T>(viewmats[0], viewmats[4], viewmats[8], // 1st column
@@ -96,13 +93,8 @@ fully_fused_projection_fwd_kernel(const uint32_t C, const uint32_t N,
     vec2<T> mean2d;
     vec2<T> ray_plane;
     vec3<T> normal;
-    bool condition = rade_persp_proj<T, INTE>(R, mean_c, covar_c, Ks[0], Ks[4], Ks[2], Ks[5], image_width,
-                  image_height, covar2d, mean2d, ray_plane, normal, invraycov3Ds);
-    
-    if constexpr (INTE)
-    {
-        conditions[idx] = condition;
-    }
+    rade_persp_proj<T>(mean_c, covar_c, Ks[0], Ks[4], Ks[2], Ks[5], image_width,
+                  image_height, covar2d, mean2d, ray_plane, normal);
 
     T compensation;
     T det = add_blur(eps2d, covar2d, compensation);
@@ -195,7 +187,7 @@ rade_fully_fused_projection_fwd_tensor(
     torch::Tensor ray_planes = torch::empty({C, N, 2}, means.options());
     torch::Tensor normals = torch::empty({C, N, 3}, means.options());
     if (C && N) {
-        fully_fused_projection_fwd_kernel<float, false>
+        fully_fused_projection_fwd_kernel<float>
             <<<(C * N + GSPLAT_N_THREADS - 1) / GSPLAT_N_THREADS, GSPLAT_N_THREADS, 0, stream>>>(
                 C, N, means.data_ptr<float>(),
                 covars.has_value() ? covars.value().data_ptr<float>() : nullptr,
@@ -206,7 +198,7 @@ rade_fully_fused_projection_fwd_tensor(
                 radii.data_ptr<int32_t>(), means2d.data_ptr<float>(),
                 depths.data_ptr<float>(), conics.data_ptr<float>(),
                 calc_compensations ? compensations.data_ptr<float>() : nullptr,
-                ray_ts.data_ptr<float>(), ray_planes.data_ptr<float>(),normals.data_ptr<float>(), nullptr, nullptr);
+                ray_ts.data_ptr<float>(), ray_planes.data_ptr<float>(),normals.data_ptr<float>());
     }
     return std::make_tuple(radii, means2d, depths, conics, compensations, ray_ts, ray_planes, normals);
 }
@@ -256,7 +248,7 @@ rade_fully_fused_projection_integration_fwd_tensor(
     torch::Tensor conditions = torch::full({C, N}, 0.0, means.options().dtype(torch::kBool));
 
     if (C && N) {
-        fully_fused_projection_fwd_kernel<float, true>
+        fully_fused_projection_fwd_kernel<float>
             <<<(C * N + GSPLAT_N_THREADS - 1) / GSPLAT_N_THREADS, GSPLAT_N_THREADS, 0, stream>>>(
                 C, N, means.data_ptr<float>(),
                 covars.has_value() ? covars.value().data_ptr<float>() : nullptr,
@@ -267,8 +259,7 @@ rade_fully_fused_projection_integration_fwd_tensor(
                 radii.data_ptr<int32_t>(), means2d.data_ptr<float>(),
                 depths.data_ptr<float>(), conics.data_ptr<float>(),
                 calc_compensations ? compensations.data_ptr<float>() : nullptr,
-                ray_ts.data_ptr<float>(), ray_planes.data_ptr<float>(),normals.data_ptr<float>(),
-                invraycov3Ds.data_ptr<float>(), conditions.data_ptr<bool>());
+                ray_ts.data_ptr<float>(), ray_planes.data_ptr<float>(),normals.data_ptr<float>());
     }
     return std::make_tuple(radii, means2d, depths, conics, compensations, ray_ts, ray_planes, normals, invraycov3Ds, conditions);
 }

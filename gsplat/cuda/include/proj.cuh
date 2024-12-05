@@ -96,23 +96,15 @@ inline __device__ void persp_proj(
 
     T tan_fovx = 0.5f * width / fx;
     T tan_fovy = 0.5f * height / fy;
-    // T lim_x_pos = (width - cx) / fx + 0.3f * tan_fovx;
-    // T lim_x_neg = cx / fx + 0.3f * tan_fovx;
-    // T lim_y_pos = (height - cy) / fy + 0.3f * tan_fovy;
-    // T lim_y_neg = cy / fy + 0.3f * tan_fovy;
-
-    // T rz = 1.f / z;
-    // T rz2 = rz * rz;
-    // T tx = z * min(lim_x_pos, max(-lim_x_neg, x * rz));
-    // T ty = z * min(lim_y_pos, max(-lim_y_neg, y * rz));
-
-    T lim_x = 1.3f * tan_fovx;
-    T lim_y = 1.3f * tan_fovy;
+    T lim_x_pos = (width - cx) / fx + 0.3f * tan_fovx;
+    T lim_x_neg = cx / fx + 0.3f * tan_fovx;
+    T lim_y_pos = (height - cy) / fy + 0.3f * tan_fovy;
+    T lim_y_neg = cy / fy + 0.3f * tan_fovy;
 
     T rz = 1.f / z;
     T rz2 = rz * rz;
-    T tx = z * min(lim_x, max(-lim_x, x * rz));
-    T ty = z * min(lim_y, max(-lim_y, y * rz));
+    T tx = z * min(lim_x_pos, max(-lim_x_neg, x * rz));
+    T ty = z * min(lim_y_pos, max(-lim_y_neg, y * rz));
 
     // mat3x2 is 3 columns x 2 rows.
     mat3x2<T> J = mat3x2<T>(
@@ -149,23 +141,15 @@ inline __device__ void persp_proj_vjp(
 
     T tan_fovx = 0.5f * width / fx;
     T tan_fovy = 0.5f * height / fy;
-    // T lim_x_pos = (width - cx) / fx + 0.3f * tan_fovx;
-    // T lim_x_neg = cx / fx + 0.3f * tan_fovx;
-    // T lim_y_pos = (height - cy) / fy + 0.3f * tan_fovy;
-    // T lim_y_neg = cy / fy + 0.3f * tan_fovy;
-
-    // T rz = 1.f / z;
-    // T rz2 = rz * rz;
-    // T tx = z * min(lim_x_pos, max(-lim_x_neg, x * rz));
-    // T ty = z * min(lim_y_pos, max(-lim_y_neg, y * rz));
-
-    T lim_x = 1.3f * tan_fovx;
-    T lim_y = 1.3f * tan_fovy;
+    T lim_x_pos = (width - cx) / fx + 0.3f * tan_fovx;
+    T lim_x_neg = cx / fx + 0.3f * tan_fovx;
+    T lim_y_pos = (height - cy) / fy + 0.3f * tan_fovy;
+    T lim_y_neg = cy / fy + 0.3f * tan_fovy;
 
     T rz = 1.f / z;
     T rz2 = rz * rz;
-    T tx = z * min(lim_x, max(-lim_x, x * rz));
-    T ty = z * min(lim_y, max(-lim_y, y * rz));
+    T tx = z * min(lim_x_pos, max(-lim_x_neg, x * rz));
+    T ty = z * min(lim_y_pos, max(-lim_y_neg, y * rz));
 
     // mat3x2 is 3 columns x 2 rows.
     mat3x2<T> J = mat3x2<T>(
@@ -200,22 +184,12 @@ inline __device__ void persp_proj_vjp(
                     glm::transpose(v_cov2d) * J * cov3d;
 
     // fov clipping
-    // if (x * rz <= lim_x_pos && x * rz >= -lim_x_neg) {
-    //     v_mean3d.x += -fx * rz2 * v_J[2][0];
-    // } else {
-    //     v_mean3d.z += -fx * rz3 * v_J[2][0] * tx;
-    // }
-    // if (y * rz <= lim_y_pos && y * rz >= -lim_y_neg) {
-    //     v_mean3d.y += -fy * rz2 * v_J[2][1];
-    // } else {
-    //     v_mean3d.z += -fy * rz3 * v_J[2][1] * ty;
-    // }
-    if (x * rz <= lim_x && x * rz >= -lim_x) {
+    if (x * rz <= lim_x_pos && x * rz >= -lim_x_neg) {
         v_mean3d.x += -fx * rz2 * v_J[2][0];
     } else {
         v_mean3d.z += -fx * rz3 * v_J[2][0] * tx;
     }
-    if (y * rz <= lim_y && y * rz >= -lim_y) {
+    if (y * rz <= lim_y_pos && y * rz >= -lim_y_neg) {
         v_mean3d.y += -fy * rz2 * v_J[2][1];
     } else {
         v_mean3d.z += -fy * rz3 * v_J[2][1] * ty;
@@ -371,26 +345,39 @@ inline __device__ void fisheye_proj_vjp(
 
 // rade
 
-template <typename T, bool INTE = false>
+template <typename T>
 inline __device__ bool rade_persp_proj(
     // inputs
-    const mat3<T> W, const vec3<T> mean3d, const mat3<T> cov3d, 
+    const vec3<T> mean3d, const mat3<T> cov3d, 
     const T fx, const T fy, const T cx,
     const T cy, const uint32_t width, const uint32_t height,
     // outputs
-    mat2<T> &cov2d, vec2<T> &mean2d, vec2<T> &ray_plane, vec3<T> &normal,
-    T *__restrict__ invraycov3Ds) {
+    mat2<T> &cov2d, vec2<T> &mean2d, vec2<T> &ray_plane, vec3<T> &normal ) {
     T x = mean3d[0], y = mean3d[1], z = mean3d[2];
+
+    // T tan_fovx = 0.5f * width / fx;
+    // T tan_fovy = 0.5f * height / fy;
+    // T lim_x = 1.3f * tan_fovx;
+    // T lim_y = 1.3f * tan_fovy;
+
+    // T rz = 1.f / z;
+    // T rz2 = rz * rz;
+    // T u = min(lim_x, max(-lim_x, x * rz));
+    // T v = min(lim_y, max(-lim_y, y * rz));
+    // T tx = z * u;
+    // T ty = z * v;
 
     T tan_fovx = 0.5f * width / fx;
     T tan_fovy = 0.5f * height / fy;
-    T lim_x = 1.3f * tan_fovx;
-    T lim_y = 1.3f * tan_fovy;
+    T lim_x_pos = (width - cx) / fx + 0.3f * tan_fovx;
+    T lim_x_neg = cx / fx + 0.3f * tan_fovx;
+    T lim_y_pos = (height - cy) / fy + 0.3f * tan_fovy;
+    T lim_y_neg = cy / fy + 0.3f * tan_fovy;
 
     T rz = 1.f / z;
     T rz2 = rz * rz;
-    T u = min(lim_x, max(-lim_x, x * rz)); // txtz
-    T v = min(lim_y, max(-lim_y, y * rz)); // tytz
+    T u = min(lim_x_pos, max(-lim_x_neg, x * rz));
+    T v = min(lim_y_pos, max(-lim_y_neg, y * rz));
     T tx = z * u;
     T ty = z * v;
 
@@ -453,61 +440,7 @@ inline __device__ bool rade_persp_proj(
 		vec3<T> cam_normal_vector = nJ_T * ray_normal_vector;
 		normal = glm::normalize(cam_normal_vector);
         ray_plane = {plane.x * factor / fx, plane.y * factor / fy};
-
-        if constexpr (INTE)
-        {
-            glm::mat3 inv_cov_ray;
-            if (well_conditioned) 
-            {
-                float ltz = uu + vv + 1;
-
-                glm::mat3 nJ_inv_full = z / (uu + vv + 1) * \
-                                        glm::mat3(
-                                            uu+1, -uv, u/l*ltz,
-                                            -uv, uu+1, v/l*ltz,
-                                            -u, -v, 1/l*ltz);
-                glm::mat3 T2 = W * glm::transpose(nJ_inv_full);
-                inv_cov_ray = glm::transpose(T2) * cov3d_inv * T2;
-            }
-            else 
-            {
-                glm::mat3 T2 = W * nJ_T;
-                glm::mat3 cov_ray = glm::transpose(T2) * cov3d_inv * T2;
-                glm::mat3 cov_eigen_vector;
-                glm::vec3 cov_eigen_value;
-                glm_modification::findEigenvaluesSymReal(cov_ray, cov_eigen_value, cov_eigen_vector);
-                unsigned int min_id = cov_eigen_value[0]>cov_eigen_value[1]? (cov_eigen_value[1]>cov_eigen_value[2]?2:1):(cov_eigen_value[0]>cov_eigen_value[2]?2:0);
-				float lambda1 = cov_eigen_value[(min_id+1)%3];
-				float lambda2 = cov_eigen_value[(min_id+2)%3];
-				float lambda3 = cov_eigen_value[min_id];
-				glm::mat3 new_cov_eigen_vector = glm::mat3();
-				new_cov_eigen_vector[0] = cov_eigen_vector[(min_id+1)%3];
-				new_cov_eigen_vector[1] = cov_eigen_vector[(min_id+2)%3];
-				new_cov_eigen_vector[2] = cov_eigen_vector[min_id];
-				glm::vec3 r3 = glm::vec3(new_cov_eigen_vector[0][2],new_cov_eigen_vector[1][2],new_cov_eigen_vector[2][2]);
-
-				glm::mat3 cov2d = glm::mat3(
-					1/lambda1,0,-r3[0]/r3[2]/lambda1,
-					0,1/lambda2,-r3[1]/r3[2]/lambda2,
-					-r3[0]/r3[2]/lambda1,-r3[1]/r3[2]/lambda2,0
-				);
-				glm::mat3 inv_cov_ray = new_cov_eigen_vector * cov2d * glm::transpose(new_cov_eigen_vector);
-            }
-			glm::mat3 scale = glm::mat3(1/fx,0,0,
-										0, 1/fy,0,
-										0,0,1);
-			inv_cov_ray = scale * inv_cov_ray * scale;
-
-            invraycov3Ds[0] = inv_cov_ray[0][0];
-            invraycov3Ds[1] = inv_cov_ray[0][1];
-            invraycov3Ds[2] = inv_cov_ray[0][2];
-            invraycov3Ds[3] = inv_cov_ray[1][1];
-            invraycov3Ds[4] = inv_cov_ray[1][2];
-            invraycov3Ds[5] = inv_cov_ray[2][2];
-        }
     }
-
-    return well_conditioned;
 }
 
 
@@ -522,17 +455,32 @@ inline __device__ void rade_persp_proj_vjp(
     vec3<T> &v_mean3d, mat3<T> &v_cov3d) {
     T x = mean3d[0], y = mean3d[1], z = mean3d[2];
 
+    // T tan_fovx = 0.5f * width / fx;
+    // T tan_fovy = 0.5f * height / fy;
+    // T lim_x = 1.3f * tan_fovx;
+    // T lim_y = 1.3f * tan_fovy;
+
+    // T rz = 1.f / z;
+    // T rz2 = rz * rz;
+    // T u = min(lim_x, max(-lim_x, x * rz));
+    // T v = min(lim_y, max(-lim_y, y * rz));
+    // T tx = z * u;
+    // T ty = z * v;
+
     T tan_fovx = 0.5f * width / fx;
     T tan_fovy = 0.5f * height / fy;
-    T lim_x = 1.3f * tan_fovx;
-    T lim_y = 1.3f * tan_fovy;
+    T lim_x_pos = (width - cx) / fx + 0.3f * tan_fovx;
+    T lim_x_neg = cx / fx + 0.3f * tan_fovx;
+    T lim_y_pos = (height - cy) / fy + 0.3f * tan_fovy;
+    T lim_y_neg = cy / fy + 0.3f * tan_fovy;
 
     T rz = 1.f / z;
     T rz2 = rz * rz;
-    T u = min(lim_x, max(-lim_x, x * rz));
-    T v = min(lim_y, max(-lim_y, y * rz));
+    T u = min(lim_x_pos, max(-lim_x_neg, x * rz));
+    T v = min(lim_y_pos, max(-lim_y_neg, y * rz));
     T tx = z * u;
     T ty = z * v;
+
     mat3<T> v_cov3d_ = {0,0,0,0,0,0,0,0,0};
 
     // mat3x2 is 3 columns x 2 rows.
